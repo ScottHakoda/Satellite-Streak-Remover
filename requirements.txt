@@ -1,2 +1,5 @@
 astropy
 matplotlib
+numpy
+opencv-python
+scipy
