@@ -8,7 +8,7 @@ def detect_streaks(image, min_line_length=50, max_line_gap=10):
     return lines
 
 
-def merge_duplicate_lines(lines, angle_threshold=2.0, distance_threshold=10.0):
+def merge_duplicate_lines(lines, angle_threshold=2.0, distance_threshold=10.0, log_callback=None):
     """
     Merge duplicate/near-duplicate line detections into unique streaks.
 
@@ -106,5 +106,6 @@ def merge_duplicate_lines(lines, angle_threshold=2.0, distance_threshold=10.0):
         merged.append(np.array([[int(round(sx)), int(round(sy)),
                                   int(round(ex)), int(round(ey))]]))
 
-    print(f"  Merged {len(lines)} raw detections into {len(merged)} unique streaks")
+    if log_callback:
+        log_callback(f"  Merged {len(lines)} raw detections into {len(merged)} unique streaks")
     return merged
