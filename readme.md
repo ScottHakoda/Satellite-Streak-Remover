@@ -42,4 +42,7 @@ This will generate two FITS files in the ../data/ directory by default:
 
 - Safe Subtraction: Uses spatial exclusion masks and direct photometric subtraction to remove the artifact without introducing negative trenching or damaging intersecting stars.
 
-- Synthetic Benchmarking: Includes a robust FITS generation module to simulate realistic sky backgrounds, read noise, stellar PSFs, and linear streaks for algorithm validation.
+- Synthetic Benchmarking: Includes a robust FITS generation module to simulate realistic sky backgrounds, read noise, stellar PSFs, and linear streaks for algorithm validation.  
+
+
+![GUI screenshot showing streak detection](practice/gui-screenshot.png)
