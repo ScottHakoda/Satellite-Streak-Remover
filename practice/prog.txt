@@ -1,0 +1,94 @@
+originial:
+Streak Removal Score: 0.6788114659446187
+Star Recovery Score (all stars): 0.9856000874400497
+Number of affected stars: 9 out of 150
+Number of unaffected stars: 141 out of 150
+Affected Star Recovery Score: 0.7027843352984028
+Unaffected Star Recovery Score: 0.9860760449024406
+Photometry consistency (cleaned/original):
+  median: 1.0
+  mean:   1.0029577325650478
+  min/max: -0.26589151160575425 2.2054690167447584
+
+Individual affected star recovery ratios:
+Star 17 (147,111): recovery = 0.865
+Star 29 (110,63): recovery = 0.622
+Star 36 (376,288): recovery = 0.710
+Star 41 (228,211): recovery = 0.656
+Star 90 (173,135): recovery = 0.766
+Star 111 (319,454): recovery = 0.703
+Star 131 (392,251): recovery = 0.825
+Star 135 (322,358): recovery = 0.685
+Star 141 (342,366): recovery = 0.380
+
+Change A: Improve background estimation
+Streak Removal Score: 0.6851686121442069
+Star Recovery Score (all stars): 0.9856000874400497
+Number of affected stars: 9 out of 150
+Number of unaffected stars: 141 out of 150
+Affected Star Recovery Score: 0.7027843352984028
+Unaffected Star Recovery Score: 0.9860760449024406
+Photometry consistency (cleaned/original):
+  median: 1.0
+  mean:   1.0029577325650478
+  min/max: -0.26589151160575425 2.2054690167447584
+
+Individual affected star recovery ratios:
+Star 17 (147,111): recovery = 0.865
+Star 29 (110,63): recovery = 0.622
+Star 36 (376,288): recovery = 0.710
+Star 41 (228,211): recovery = 0.656
+Star 90 (173,135): recovery = 0.766
+Star 111 (319,454): recovery = 0.703
+Star 131 (392,251): recovery = 0.825
+Star 135 (322,358): recovery = 0.685
+Star 141 (342,366): recovery = 0.278
+
+Change B: Exclude other streak pixels when fitting one streak
+Streak Removal Score: 0.6785517344973254
+Star Recovery Score (all stars): 0.9856512072393024
+Number of affected stars: 9 out of 150
+Number of unaffected stars: 141 out of 150
+Affected Star Recovery Score: 0.7083659883958829
+Unaffected Star Recovery Score: 0.9860760449024406
+Photometry consistency (cleaned/original):
+  median: 1.0
+  mean:   1.0029104896157328
+  min/max: -0.28091858684482607 2.205819804631058
+
+Individual affected star recovery ratios:
+Star 17 (147,111): recovery = 0.864
+Star 29 (110,63): recovery = 0.621
+Star 36 (376,288): recovery = 0.709
+Star 41 (228,211): recovery = 0.656
+Star 90 (173,135): recovery = 0.765
+Star 111 (319,454): recovery = 0.708
+Star 131 (392,251): recovery = 0.826
+Star 135 (322,358): recovery = 0.685
+Star 141 (342,366): recovery = 0.677
+
+NOTE: models of streak intersection look much better, cleaned image looks better aswell
+
+
+Change C: combine streak models correctly
+Streak Removal Score: 0.692557617998685
+Star Recovery Score (all stars): 0.9856512072393024
+Number of affected stars: 9 out of 150
+Number of unaffected stars: 141 out of 150
+Affected Star Recovery Score: 0.7083659883958829
+Unaffected Star Recovery Score: 0.9860760449024406
+Photometry consistency (cleaned/original):
+  median: 1.0
+  mean:   1.0029104896157328
+  min/max: -0.28091858684482607 2.205819804631058
+
+Individual affected star recovery ratios:
+Star 17 (147,111): recovery = 0.864
+Star 29 (110,63): recovery = 0.621
+Star 36 (376,288): recovery = 0.709
+Star 41 (228,211): recovery = 0.656
+Star 90 (173,135): recovery = 0.765
+Star 111 (319,454): recovery = 0.708
+Star 131 (392,251): recovery = 0.826
+Star 135 (322,358): recovery = 0.685
+Star 141 (342,366): recovery = 0.571

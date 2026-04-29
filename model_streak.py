@@ -1,19 +1,13 @@
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.ndimage import median_filter
 
-def estimate_streak_profile(image_data, line, profile_half_width=15, n_samples=100):
+def estimate_streak_profile(image_data, line, profile_half_width=35, n_samples=50, exclude_mask=None):
     """
-    Model a streak by fitting its perpendicular cross-section at many points
-    along its length, using sigma-clipping to exclude sources.
-
-    The approach:
-    1. First pass: sample many cross-sections to establish the streak's
-       global amplitude and width (sigma), using robust statistics.
-    2. Second pass: at each cross-section, build the streak model using
-       the global parameters, only allowing small local variations.
-       Cap the amplitude so bright sources can't inflate it.
-
-    Returns a 2D array containing ONLY the streak flux (excess above background).
+    Model a streak using a dynamic angle-correcting approach:
+    1. sample cross-sections to establish global shape parameters.
+    2. Fit a polynomial to correct angle errors and dynamic amplitude.
+    3. render the streak using signed geometric distance
     """
     if isinstance(line, np.ndarray) and line.ndim > 1:
         x1, y1, x2, y2 = line[0]
@@ -24,198 +18,171 @@ def estimate_streak_profile(image_data, line, profile_half_width=15, n_samples=1
     if length == 0:
         return np.zeros_like(image_data, dtype=float)
 
-    # Unit vectors along and perpendicular to the streak
     dx, dy = (x2 - x1) / length, (y2 - y1) / length
     perp_dx, perp_dy = -dy, dx
 
     h, w = image_data.shape
     streak_model = np.zeros_like(image_data, dtype=float)
-    weight_map = np.zeros_like(image_data, dtype=float)
 
-    # Scale n_samples to streak length
-    n_samples = max(n_samples, int(length))
+    def moffat(x, amplitude, center, alpha, beta):
+        return amplitude * (1 + ((x - center) / alpha)**2)**(-beta)
+    
+    def estimate_wing_baseline(values, offs, min_wing_frac=0.6):
+        for frac in (min_wing_frac, 0.4):
+            wing_mask = np.abs(offs) > profile_half_width * frac
+            if np.sum(wing_mask) < 4: continue
 
-    t_values = np.linspace(0, 1, n_samples)
+            wing_vals = values[wing_mask]
+            wing_offs = offs[wing_mask]
 
-    def gaussian(x, amplitude, center, sigma):
-        return amplitude * np.exp(-(x - center)**2 / (2 * sigma**2))
+            for _ in range(3):
+                med = np.median(wing_vals)
+                std = np.std(wing_vals)
+                if std == 0: break
+                keep = np.abs(wing_vals - med) < 2.5 * std
+                if np.sum(keep) < 3: break
+                wing_vals = wing_vals[keep]
+                wing_offs = wing_offs[keep]
+
+            if np.sum(wing_vals) < 3: continue
+            left = wing_vals[wing_offs < 0]
+            right = wing_vals[wing_offs > 0]
+            if left.size >= 2 and right.size >= 2:
+                if np.abs(np.median(left) - np.median(right)) > 2.5 * np.std(np.concatenate([left, right])):
+                    continue
+            return np.median(wing_vals)
+        return None
 
     # =========================================================================
-    # FIRST PASS: Estimate global streak parameters (amplitude, sigma)
-    # Sample many cross-sections and collect fitted amplitudes/sigmas,
-    # then take robust (median) estimates.
+    # Estimate parameters & track center drift
     # =========================================================================
-    trial_sigmas = []
-    trial_amps = []
-    trial_baselines = []
+    trial_alphas, trial_betas, trial_amps = [], [], []
+    trial_centers, trial_t_dists = [], [] 
 
-    for t in np.linspace(0.05, 0.95, min(50, n_samples)):
+    for t in np.linspace(0.05, 0.95, min(n_samples, int(length))):
         cx = x1 + t * (x2 - x1)
         cy = y1 + t * (y2 - y1)
 
         offsets = np.arange(-profile_half_width, profile_half_width + 1)
-        values = []
-        offs_list = []
+        values, offs_list, excluded = [], [], []
+        
         for off in offsets:
-            px = int(round(cx + off * perp_dx))
-            py = int(round(cy + off * perp_dy))
+            px, py = int(round(cx + off * perp_dx)), int(round(cy + off * perp_dy))
             if 0 <= px < w and 0 <= py < h:
                 values.append(image_data[py, px])
                 offs_list.append(off)
-        if len(values) < 10:
-            continue
+                excluded.append(exclude_mask[py, px] if exclude_mask is not None else False)
+                
+        if len(values) < 10: continue
 
         values = np.array(values, dtype=float)
         offs_arr = np.array(offs_list, dtype=float)
+        valid = ~np.array(excluded, dtype=bool)
 
-        # Background from wings
+        if np.sum(valid) < 10: continue
+        values, offs_arr = values[valid], offs_arr[valid]
+
         wing_mask = np.abs(offs_arr) > profile_half_width * 0.6
-        if np.sum(wing_mask) < 4:
-            continue
-        wing_vals = values[wing_mask]
-        for _ in range(3):
-            med = np.median(wing_vals)
-            std = np.std(wing_vals)
-            if std == 0:
-                break
-            keep = np.abs(wing_vals - med) < 2.5 * std
-            if np.sum(keep) < 3:
-                break
-            wing_vals = wing_vals[keep]
-        baseline = np.median(wing_vals)
-        trial_baselines.append(baseline)
+        if np.sum(wing_mask) < 4: continue
+        
+        baseline = estimate_wing_baseline(values, offs_arr)
+        if baseline is None: continue
 
         excess = values - baseline
-
         try:
             amp_guess = np.max(excess)
-            if amp_guess <= 0:
-                continue
+            if amp_guess <= 0: continue
+            
             popt, _ = curve_fit(
-                gaussian, offs_arr, excess,
-                p0=[amp_guess, 0, 3.0],
-                bounds=([0, -5, 0.5], [np.inf, 5, profile_half_width]),
+                moffat, offs_arr, excess,
+                p0=[amp_guess, 0.0, 3.0, 2.5],
+                bounds=([0, -5.0, 0.5, 1.1], [np.inf, 5.0, profile_half_width/2, 8.0]),
                 maxfev=2000
             )
-            trial_sigmas.append(popt[2])
             trial_amps.append(popt[0])
+            trial_centers.append(popt[1]) 
+            trial_t_dists.append(t * length) 
+            trial_alphas.append(popt[2])
+            trial_betas.append(popt[3])
         except (RuntimeError, ValueError):
             continue
 
-    if len(trial_sigmas) < 3:
-        # Not enough data to characterize streak
+    if len(trial_alphas) < 3:
         return np.zeros_like(image_data, dtype=float)
 
-    # Robust global estimates using median
-    global_sigma = np.median(trial_sigmas)
-    global_amp = np.median(trial_amps)
+    # Global shape parameters for width/decay
+    global_alpha = np.median(trial_alphas)
+    global_beta = np.median(trial_betas)
 
-    # Compute robust spread of amplitudes (MAD-based) to set a cap.
-    # The amplitude should be fairly constant along the streak.
-    # Sources inflate it, so use a tight upper bound.
-    amp_mad = np.median(np.abs(np.array(trial_amps) - global_amp))
-    amp_std_robust = 1.4826 * amp_mad  # MAD to std conversion
-    amp_cap = global_amp + 3.0 * amp_std_robust  # hard ceiling
+    # --- DYNAMIC AMPLITUDE LOGIC ---
+    trial_amps = np.array(trial_amps)
+    trial_t_dists_arr = np.array(trial_t_dists)
+    
+    # 1. Erase stars using a rolling median filter
+    smoothed_amps = median_filter(trial_amps, size=5)
+    
+    # 2. Fit a low-degree polynomial to the smoothed amplitudes.
+    # Fallback to lower degrees if there are very few valid samples
+    if len(smoothed_amps) >= 3:
+        amp_poly = np.polyfit(trial_t_dists_arr, smoothed_amps, 2)
+    elif len(smoothed_amps) == 2:
+        amp_poly = np.polyfit(trial_t_dists_arr, smoothed_amps, 1)
+    else:
+        amp_poly = [0.0, 0.0, smoothed_amps[0]]
+    # -----------------------------------
 
-    # Constrain sigma tightly around global estimate
-    sigma_lo = max(0.5, global_sigma * 0.7)
-    sigma_hi = global_sigma * 1.5
+    # Fix Angle Errors
+    trial_centers = np.array(trial_centers)
+    trial_t_dists = np.array(trial_t_dists)
+    
+    med_center = np.median(trial_centers)
+    mad_center = np.median(np.abs(trial_centers - med_center))
+    valid_centers = np.abs(trial_centers - med_center) < (3.0 * 1.4826 * mad_center + 0.5)
 
-    print(f"    Streak global params: amplitude={global_amp:.1f}, "
-          f"sigma={global_sigma:.2f}, amp_cap={amp_cap:.1f}")
+    # Only use the middle 70% of the line to establish the angle
+    # core_mask = (trial_t_dists > length * 0.15) & (trial_t_dists < length * 0.85)
+    # valid_core = valid_centers & core_mask
+    
+    if np.sum(valid_centers) >= 2:
+        center_poly = np.polyfit(trial_t_dists[valid_centers], trial_centers[valid_centers], 2)
+    else:
+        center_poly = [0.0, med_center]
 
     # =========================================================================
-    # SECOND PASS: Build per-slice streak model with constrained parameters
+    # Vectorized Rendering 
     # =========================================================================
-    for t in t_values:
-        cx = x1 + t * (x2 - x1)
-        cy = y1 + t * (y2 - y1)
+    x_min = max(0, int(min(x1, x2) - profile_half_width - 2))
+    x_max = min(w, int(max(x1, x2) + profile_half_width + 2))
+    y_min = max(0, int(min(y1, y2) - profile_half_width - 2))
+    y_max = min(h, int(max(y1, y2) + profile_half_width + 2))
 
-        offsets = np.arange(-profile_half_width, profile_half_width + 1)
-        coords = []
-        values = []
+    yy, xx = np.mgrid[y_min:y_max, x_min:x_max]
 
-        for off in offsets:
-            px = int(round(cx + off * perp_dx))
-            py = int(round(cy + off * perp_dy))
-            if 0 <= px < w and 0 <= py < h:
-                coords.append((py, px, off))
-                values.append(image_data[py, px])
+    wx = xx - x1
+    wy = yy - y1
 
-        if len(values) < 2 * profile_half_width // 3:
-            continue
+    t_dist = (wx * dx) + (wy * dy)
+    signed_d_perp = wy * dx - wx * dy
+    d_perp_abs = np.abs(signed_d_perp)
 
-        values = np.array(values, dtype=float)
-        offs = np.array([c[2] for c in coords], dtype=float)
+    valid_mask = (t_dist >= 0.0) & (t_dist <= length) & (d_perp_abs <= profile_half_width)
 
-        # --- Step 1: Estimate background from the wings ---
-        wing_mask = np.abs(offs) > profile_half_width * 0.6
-        if np.sum(wing_mask) < 4:
-            wing_mask = np.abs(offs) > profile_half_width * 0.4
-        wing_vals = values[wing_mask]
-        for _ in range(3):
-            med = np.median(wing_vals)
-            std = np.std(wing_vals)
-            if std == 0:
-                break
-            keep = np.abs(wing_vals - med) < 2.5 * std
-            if np.sum(keep) < 3:
-                break
-            wing_vals = wing_vals[keep]
-        baseline = np.median(wing_vals)
+    dynamic_center = np.polyval(center_poly, t_dist[valid_mask])
+    
+    # --- DYNAMIC AMPLITUDE RENDERING ---
+    dynamic_amp = np.polyval(amp_poly, t_dist[valid_mask])
+    dynamic_amp = np.clip(dynamic_amp, 0.0, None)
+    
+    fluxes = moffat(signed_d_perp[valid_mask], dynamic_amp, dynamic_center, global_alpha, global_beta)
+    # ---------------------------------------
 
-        excess = values - baseline
+    # TAPER LOGIC: Smoothly fade out the flux over the last 3 pixels of the line.
+    # t_valid = t_dist[valid_mask]
+    # dist_to_ends = np.minimum(t_valid, length - t_valid)
+    # taper = np.clip(dist_to_ends / 3.0, 0.0, 1.0)
+    
+    # fluxes *= taper
 
-        # --- Step 2: Pre-mask likely source pixels before fitting ---
-        # Any pixel with excess > amp_cap is almost certainly a source.
-        # Exclude those from the fit entirely.
-        source_mask = excess > amp_cap
-        fit_mask = ~source_mask
-        if np.sum(fit_mask) < 5:
-            # Almost all pixels are flagged — use global model directly
-            best_fit = gaussian(offs, global_amp, 0, global_sigma)
-        else:
-            best_fit = np.zeros_like(excess)
-
-            # Iterative fit with constrained sigma AND capped amplitude
-            for iteration in range(3):
-                try:
-                    fit_excess = excess[fit_mask]
-                    fit_offs = offs[fit_mask]
-                    amp_guess = min(np.max(fit_excess), amp_cap)
-                    if amp_guess <= 0:
-                        # No streak signal here — use global model
-                        best_fit = gaussian(offs, global_amp, 0, global_sigma)
-                        break
-
-                    popt, _ = curve_fit(
-                        gaussian, fit_offs, fit_excess,
-                        p0=[amp_guess, 0, global_sigma],
-                        bounds=([0, -3, sigma_lo],
-                                [amp_cap, 3, sigma_hi]),
-                        maxfev=2000
-                    )
-                    best_fit = gaussian(offs, *popt)
-
-                    # Check residuals for remaining source contamination
-                    residuals = excess - best_fit
-                    res_std = np.std(residuals[fit_mask])
-                    new_fit_mask = (~source_mask) & (residuals < 2.5 * res_std)
-                    if np.sum(new_fit_mask) < 5:
-                        break
-                    fit_mask = new_fit_mask
-                except (RuntimeError, ValueError):
-                    # Fit failed — use global model as fallback
-                    best_fit = gaussian(offs, global_amp, 0, global_sigma)
-                    break
-
-        # --- Step 3: Write the smooth streak model into the 2D array ---
-        for i, (py, px, off) in enumerate(coords):
-            streak_model[py, px] += max(best_fit[i], 0)
-            weight_map[py, px] += 1.0
-
-    # Average overlapping contributions from cross-section sampling
-    valid = weight_map > 0
-    streak_model[valid] /= weight_map[valid]
+    streak_model[yy[valid_mask], xx[valid_mask]] += fluxes
 
     return streak_model

@@ -244,6 +244,10 @@ def create_synthetic_image(shape=(512, 512), sky_level=1000, read_noise=10,
                         min_flux=star_flux_range[0], max_flux=star_flux_range[1],
                         positions=star_positions)
     
+    truth_image = image.copy()         # clean reference image without streaks
+    streak_image = truth_image.copy()  # image with streaks added
+
+
     # Inject streaks
     streak_info = []
     if streaks is not None:
@@ -253,7 +257,7 @@ def create_synthetic_image(shape=(512, 512), sky_level=1000, read_noise=10,
             width = streak_params.get('width', 3.0)
             flux = streak_params.get('flux', 5000)
             
-            streak_data = inject_streak(image, start, end, width, flux)
+            streak_data = inject_streak(streak_image, start, end, width, flux)
             streak_info.append(streak_data)
     
     # Compile metadata
@@ -267,7 +271,7 @@ def create_synthetic_image(shape=(512, 512), sky_level=1000, read_noise=10,
         'streaks': streak_info
     }
     
-    return image, metadata
+    return streak_image, truth_image, metadata
 
 
 def save_to_fits(image, filename, metadata=None):
@@ -390,7 +394,7 @@ def main():
     ]
     
     # Create synthetic image
-    image, metadata = create_synthetic_image(
+    streak_image, truth_image, metadata = create_synthetic_image(
         shape=image_shape,
         sky_level=1000,
         read_noise=10,
@@ -420,12 +424,18 @@ def main():
             print(f"    Flux: {streak['flux']} counts/pixel")
     
     # Save to FITS file
-    output_filename = 'data/synthetic_image.fits'
-    save_to_fits(image, output_filename, metadata)
+    output_filename = '../data/synthetic_image.fits'
+    save_to_fits(streak_image, output_filename, metadata)
+
+    truth_filename = '../data/synthetic_image_truth.fits'
+    save_to_fits(truth_image, truth_filename, metadata)
+
+    print(f"\nSaved streaked image to {output_filename}")
+    print(f"Saved streak-free truth image to {truth_filename}")
     
     # Visualize
     print("\nDisplaying image...")
-    visualize_image(image, metadata, show_annotations=True)
+    visualize_image(streak_image, metadata, show_annotations=True)
 
 
 if __name__ == '__main__':

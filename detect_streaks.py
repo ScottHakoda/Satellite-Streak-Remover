@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-Program to detect streaks in FITS images using Hough transform.
-"""
 
 from astropy.io import fits
 import matplotlib.pyplot as plt
@@ -32,16 +29,31 @@ def preprocess_image(image_data, threshold_percentile=95):
 
     return thresh
 
+def build_line_mask(shape, line, profile_half_width):
+    mask = np.zeros(shape, dtype=bool)
+    x1, y1, x2, y2 = line[0]
+    length = int(np.hypot(x2 - x1, y2 - y1)) + 1
+    dx, dy = (x2 - x1) / length, (y2 - y1) / length
+    perp_dx, perp_dy = -dy, dx
 
+    for t in np.linspace(0, 1, length):
+        cx = x1 + t * (x2 - x1)
+        cy = y1 + t * (y2 - y1)
+        for off in range(-profile_half_width, profile_half_width + 1):
+            px = int(round(cx + off * perp_dx))
+            py = int(round(cy + off * perp_dy))
+            if 0 <= px < shape[1] and 0 <= py < shape[0]:
+                mask[py, px] = True
+    return mask
 
-def subtract_streaks(image_data, lines, profile_half_width=15, n_samples=100, progress_callback=None, log_callback=None):
+def subtract_streaks(image_data, lines, profile_half_width=35, n_samples=50, progress_callback=None, log_callback=None):
     """
     Subtract streak flux from the image while preserving sources and background.
 
     Parameters:
     - image_data: Original FITS image
     - lines: Detected lines from Hough transform (raw, may contain duplicates)
-    - profile_half_width: Half-width of perpendicular sampling window
+    - profile_half_width: Half-width of perpendicular sampling window (increased to 35)
     - n_samples: Number of cross-sections per streak
 
     Returns:
@@ -58,26 +70,38 @@ def subtract_streaks(image_data, lines, profile_half_width=15, n_samples=100, pr
         return image_data.copy(), np.zeros_like(image_data)
 
     total_streak_model = np.zeros_like(image_data, dtype=float)
+    residual = image_data.astype(float)
+
+    line_masks = [
+        build_line_mask(image_data.shape, line, profile_half_width)
+        for line in unique_lines
+    ]
 
     for i, line in enumerate(unique_lines):
+        other_mask = np.zeros_like(image_data, dtype=bool)
+        for j, mask in enumerate(line_masks):
+            if j != i:
+                other_mask |= mask
 
         streak_model = estimate_streak_profile(
-            image_data, line,
+            residual,
+            line,
             profile_half_width=profile_half_width,
-            n_samples=n_samples
+            n_samples=n_samples,
+            exclude_mask=other_mask
         )
-        total_streak_model = np.maximum(total_streak_model, streak_model)
+        total_streak_model += streak_model
+        residual -= streak_model
 
         if progress_callback:
             progress = 40 + int((i + 1) * 30 / len(unique_lines))
             progress_callback(progress)
 
-    # Smooth the streak model slightly to avoid pixel-level noise in subtraction
-    total_streak_model = median_filter(total_streak_model, size=3)
 
     corrected_image = image_data.astype(float) - total_streak_model
 
     return corrected_image, total_streak_model
+
 
 
 def plot_results(original_image, processed_image, lines, streak_model, masked_image):
@@ -153,6 +177,11 @@ def detect_remove(fits_file, progress_callback=None, log_callback=None):
         else:
             if log_callback: log_callback("No streaks detected.")
             masked_image = image_data.copy()
+
+        # Save streak model to FITS
+        output_streak_fits = fits_file.replace('.fits', '_streakmodel.fits')
+        streak_hdu = fits.PrimaryHDU(streak_model.astype(np.float32))
+        streak_hdu.writeto(output_streak_fits, overwrite=True)
 
         # Save cleaned image to FITS
         output_fits = fits_file.replace('.fits', '_cleaned.fits')

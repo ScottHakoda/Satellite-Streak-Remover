@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def detect_streaks(image, min_line_length=50, max_line_gap=10):
+def detect_streaks(image, min_line_length=50, max_line_gap=1):
     """Detect streaks using Hough line transform."""
     lines = cv2.HoughLinesP(image, 1, np.pi/180, threshold=50,
                             minLineLength=min_line_length, maxLineGap=max_line_gap)
@@ -80,6 +80,7 @@ def merge_duplicate_lines(lines, angle_threshold=2.0, distance_threshold=10.0, l
     # For each group, compute the merged line by taking the extreme endpoints
     merged = []
     for group in groups:
+        
         all_points = []
         angles = []
         for idx in group:
